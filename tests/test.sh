@@ -78,6 +78,21 @@ r.push(await send("s1"));
 console.log(JSON.stringify(r.map((t) => t.includes("box-7"))));
 EOF
   check "opencode: first, not repeat, not child, after compact" test "$(node "$TMP/oc.mjs" 2>/dev/null)" = '[true,false,false,true]'
+  cat > "$TMP/oc2.mjs" <<EOF
+import plugin, { ProjectMemoryPlugin } from "$HOME/.config/opencode/plugins/project-memory.js";
+const sessions = { s1: { location: { directory: "$PROJ" } }, child: { parentID: "s1", location: { directory: "$PROJ" } } };
+let hook, gets = 0, disposed = false;
+const ctx = { location: { directory: "$TMP" }, session: {
+  get: async ({ sessionID }) => { gets++; return sessions[sessionID]; },
+  hook: async (name, fn) => { if (name === "context") hook = fn; return { dispose: async () => { disposed = true; } }; },
+} };
+const cleanup = await plugin.setup(ctx);
+const ask = async (id) => { const i = { sessionID: id, system: [] }; await hook(i); return i.system.some((p) => p.type === "text" && p.text.includes("box-7")); };
+const r = [plugin.server === ProjectMemoryPlugin, await ask("s1"), await ask("s1"), await ask("child"), gets === 2];
+await cleanup(); r.push(disposed);
+console.log(JSON.stringify(r));
+EOF
+  check "opencode 2: every request, session dir, not child, one lookup, disposes" test "$(node "$TMP/oc2.mjs" 2>/dev/null)" = '[true,true,true,false,true,true]'
 fi
 
 if command -v bun >/dev/null 2>&1; then

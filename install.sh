@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options] [harness...]
 
-Harnesses: droid, codex, opencode, pi, all.
+Harnesses: droid, codex, opencode (1 and 2), pi, all.
 With no harness named, installs for every harness found on this machine.
 
 Options:
@@ -60,7 +60,8 @@ detect() {
   local found=()
   { [ -d "$FACTORY_DIR" ] || command -v droid >/dev/null 2>&1; } && found+=(droid)
   { [ -d "$CODEX_DIR" ] || command -v codex >/dev/null 2>&1; } && found+=(codex)
-  { [ -d "$OPENCODE_DIR" ] || command -v opencode >/dev/null 2>&1; } && found+=(opencode)
+  { [ -d "$OPENCODE_DIR" ] || command -v opencode >/dev/null 2>&1 || command -v opencode2 >/dev/null 2>&1 \
+    || command -v opencode-next >/dev/null 2>&1; } && found+=(opencode)
   { [ -d "$PI_DIR" ] || command -v pi >/dev/null 2>&1; } && found+=(pi)
   printf '%s\n' "${found[@]:-}"
 }

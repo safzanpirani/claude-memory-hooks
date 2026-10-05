@@ -1,7 +1,8 @@
 // Installed by claude-memory-hooks; reinstalling overwrites this file.
-// Adds the project's Claude Code auto-memory and upkeep instructions to the
-// first user message of each top-level session, and again after the session
-// compacts.
+// Adds the project's Claude Code auto-memory and upkeep instructions to each
+// top-level session. OpenCode 1 appends it to the first user message and again
+// after the session compacts. OpenCode 2 adds it to the system prompt of every
+// model request, so it survives compaction on its own.
 
 import { spawnSync } from "node:child_process";
 
@@ -48,3 +49,32 @@ export const ProjectMemoryPlugin = async ({ directory }) => {
     },
   };
 };
+
+// OpenCode 2 runs one server for every directory, so it reads the memory once
+// per session, from that session's own directory, and skips subagent sessions.
+function setup(ctx) {
+  const sessions = new Map();
+  const memoryFor = async (sessionID) => {
+    if (!sessions.has(sessionID)) {
+      sessions.set(
+        sessionID,
+        ctx.session
+          .get({ sessionID })
+          .then((s) => (s && !s.parentID ? memory(s.location?.directory || ctx.location?.directory || process.cwd()) : ""))
+          .catch(() => ""),
+      );
+    }
+    return sessions.get(sessionID);
+  };
+  return ctx.session
+    .hook("context", async (input) => {
+      const text = await memoryFor(input.sessionID);
+      if (text) input.system.push({ type: "text", text });
+    })
+    .then((registration) => () => registration.dispose());
+}
+
+// OpenCode 1 (1.18.29+) calls server() and ignores the named export; older
+// releases call the named export. OpenCode 2 loads this file from the same
+// plugins directory and calls setup().
+export default { id: "claude-memory-hooks", server: ProjectMemoryPlugin, setup };
