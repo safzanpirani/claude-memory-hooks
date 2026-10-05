@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # memory-hook: print a project's Claude Code auto-memory plus upkeep instructions
-# for agents that do not load it natively (Droid, Codex, OpenCode, Pi).
+# for agents that do not load it natively (Droid, Codex, OpenCode, Pi, Antigravity).
 # Reads memory through ../lib/read-memory.sh, relative to this script.
 #
-# Usage: memory-hook droid|codex|text < hook-input.json
+# Usage: memory-hook droid|codex|agy|text < hook-input.json
 #   droid, codex  emit SessionStart JSON (hookSpecificOutput.additionalContext)
+#   agy           emit PreInvocation JSON (injectSteps userMessage), once per
+#                 conversation: skipped when the transcript already holds it
 #   text          emit plain text (OpenCode plugin, Pi extension)
-# The working directory comes from the input's "cwd" field, else $PWD.
-# Prints nothing and exits 0 on any failure, so a broken hook never blocks a session.
+# The working directory comes from the input's "cwd" field (agy: the first of
+# "workspacePaths"), else $PWD.
+# Prints nothing (agy: {}) and exits 0 on any failure, so a broken hook never
+# blocks a session.
 
 set -uo pipefail
 
@@ -19,15 +23,31 @@ done
 READER="$(cd "$(dirname "$self")/.." && pwd -P)/lib/read-memory.sh"
 fmt="${1:-text}"
 
+# Antigravity expects a JSON object on stdout even when there is nothing to add.
+skip() { [ "$fmt" = agy ] && echo '{}'; exit 0; }
+
 input="$(cat 2>/dev/null || true)"
 cwd=""
 if [ -n "$input" ] && command -v jq >/dev/null 2>&1; then
-  cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+  cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspacePaths[0]? // empty' 2>/dev/null || true)"
 fi
-[ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
-[ -x "$READER" ] || exit 0
 
-own="$("$READER" --dir "$cwd" 2>/dev/null)" || exit 0
+# Antigravity runs PreInvocation before every model call and has no session-start
+# event. The injected user message stays in the conversation, so inject only when
+# the transcript does not already contain one.
+if [ "$fmt" = agy ]; then
+  command -v jq >/dev/null 2>&1 || skip
+  transcript="$(printf '%s' "$input" | jq -r '.transcriptPath // empty' 2>/dev/null || true)"
+  if [ -n "$transcript" ] && [ -f "$transcript" ] \
+    && grep -F '"type":"USER_INPUT"' "$transcript" 2>/dev/null | grep -qF '<project-memory>'; then
+    skip
+  fi
+fi
+
+[ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
+[ -x "$READER" ] || skip
+
+own="$("$READER" --dir "$cwd" 2>/dev/null)" || skip
 memory="$("$READER" "$cwd" 2>/dev/null)" || memory=""
 
 if [ -n "$memory" ]; then
@@ -66,6 +86,9 @@ case "$fmt" in
     ;;
   codex)
     jq -n --arg ctx "$body" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
+    ;;
+  agy)
+    jq -n --arg ctx "$body" '{injectSteps: [{userMessage: $ctx}]}' || echo '{}'
     ;;
   *)
     printf '%s\n' "$body"

@@ -8,8 +8,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
-unset FACTORY_HOME CODEX_HOME XDG_CONFIG_HOME XDG_DATA_HOME PI_CODING_AGENT_DIR CLAUDE_CONFIG_DIR
-mkdir -p "$HOME/.factory" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.pi/agent"
+unset ANTIGRAVITY_CONFIG_DIR FACTORY_HOME CODEX_HOME XDG_CONFIG_HOME XDG_DATA_HOME PI_CODING_AGENT_DIR CLAUDE_CONFIG_DIR
+mkdir -p "$HOME/.factory" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.pi/agent" "$HOME/.gemini/config"
+printf '{"other": {"Stop": [{"type": "command", "command": "other-tool stop"}]}}\n' > "$HOME/.gemini/config/hooks.json"
 
 pass=0
 fail=0
@@ -51,6 +52,7 @@ check "droid keeps key order" test "$(jq -c 'keys_unsorted' "$HOME/.factory/sett
 check "droid keeps file mode" test "$(stat -f %Lp "$HOME/.factory/settings.json" 2>/dev/null || stat -c %a "$HOME/.factory/settings.json")" = 600
 check "codex hooks.json created" test "$(count_hooks "$HOME/.codex/hooks.json" .hooks.SessionStart)" = 1
 check "opencode plugin path filled" grep -qF "\"$HOOK\"" "$HOME/.config/opencode/plugins/project-memory.js"
+check "agy hook added" jq -e --arg h "$HOOK" '.["claude-memory-hooks"].PreInvocation[0].command == "\u0027\($h)\u0027 agy" and .other.Stop[0].command == "other-tool stop"' "$HOME/.gemini/config/hooks.json"
 check "pi extension path filled" grep -qF "\"$HOOK\"" "$HOME/.pi/agent/extensions/project-memory.ts"
 
 "$ROOT/install.sh" all > /dev/null
@@ -64,6 +66,12 @@ check "output has upkeep instructions" grep -q "Keep this project's memory curre
 check "codex output has no suppressOutput" jq -e '(has("suppressOutput") | not)' <<<"$(printf '{"cwd":"%s"}' "$PROJ" | "$HOOK" codex)"
 none="$(mkdir -p "$TMP/empty" && printf '{"cwd":"%s"}' "$TMP/empty" | "$HOOK" text)"
 check "no-memory project still gets write target" grep -q "No project memory exists yet" <<<"$none"
+agy="$(printf '{"workspacePaths":["%s"],"transcriptPath":"%s"}' "$PROJ/sub" "$TMP/none.jsonl" | "$HOOK" agy)"
+check "agy injects a user message from workspacePaths" jq -e '.injectSteps[0].userMessage | contains("box-7")' <<<"$agy"
+jq -nc --arg c "<USER_REQUEST>$(jq -r '.injectSteps[0].userMessage' <<<"$agy")</USER_REQUEST>" '{step_index: 1, source: "SYSTEM_SDK", type: "USER_INPUT", content: $c}' > "$TMP/seen.jsonl"
+check "agy skips a conversation that already has it" test "$(printf '{"workspacePaths":["%s"],"transcriptPath":"%s"}' "$PROJ" "$TMP/seen.jsonl" | "$HOOK" agy)" = '{}'
+mkdir -p "$TMP/nohook" && cp "$HOOK" "$TMP/nohook/"
+check "agy prints {} without memory reader" test "$(echo '{}' | "$TMP/nohook/memory-hook" agy)" = '{}'
 check "missing cwd falls back to PWD" grep -q "box-7" <<<"$(cd "$PROJ" && echo '{}' | "$HOOK" text)"
 
 if command -v node >/dev/null 2>&1; then
@@ -114,6 +122,7 @@ fi
 check "uninstall removes droid hook" test "$(count_hooks "$HOME/.factory/settings.json" .hooks.SessionStart)" = 0
 check "uninstall keeps other droid hooks" jq -e '.hooks.SessionStart[0].hooks[0].command == "other-tool start" and (.hooks.Stop | length) == 1' "$HOME/.factory/settings.json"
 check "uninstall drops empty codex SessionStart" jq -e '.hooks | has("SessionStart") | not' "$HOME/.codex/hooks.json"
+check "uninstall removes only the agy hook" jq -e '(has("claude-memory-hooks") | not) and has("other")' "$HOME/.gemini/config/hooks.json"
 check "uninstall removes adapters" test ! -e "$HOME/.config/opencode/plugins/project-memory.js" -a ! -e "$HOME/.pi/agent/extensions/project-memory.ts"
 check "uninstall removes scripts" test ! -e "$HOME/.local/share/claude-memory-hooks"
 

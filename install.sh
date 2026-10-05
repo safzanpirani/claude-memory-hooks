@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh: load Claude Code's per-project memory into Droid, Codex,
-# OpenCode, and Pi sessions. Run ./install.sh --help for usage.
+# OpenCode, Pi, and Antigravity (agy) sessions. Run ./install.sh --help for usage.
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options] [harness...]
 
-Harnesses: droid, codex, opencode (1 and 2), pi, all.
+Harnesses: droid, codex, opencode (1 and 2), pi, agy, all.
 With no harness named, installs for every harness found on this machine.
 
 Options:
@@ -18,7 +18,8 @@ Options:
                   (default: ${XDG_DATA_HOME:-~/.local/share}/claude-memory-hooks)
   -h, --help      show this help
 
-Environment overrides: FACTORY_HOME, CODEX_HOME, XDG_CONFIG_HOME, PI_CODING_AGENT_DIR.
+Environment overrides: FACTORY_HOME, CODEX_HOME, XDG_CONFIG_HOME, PI_CODING_AGENT_DIR,
+ANTIGRAVITY_CONFIG_DIR.
 EOF
 }
 
@@ -35,8 +36,8 @@ while [ $# -gt 0 ]; do
     --prefix) [ $# -ge 2 ] || { echo "--prefix needs a directory" >&2; exit 2; }; PREFIX="$2"; shift ;;
     --prefix=*) PREFIX="${1#--prefix=}" ;;
     -h|--help) usage; exit 0 ;;
-    all) targets=(droid codex opencode pi) ;;
-    droid|codex|opencode|pi) targets+=("$1") ;;
+    all) targets=(droid codex opencode pi agy) ;;
+    droid|codex|opencode|pi|agy) targets+=("$1") ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
@@ -49,6 +50,7 @@ FACTORY_DIR="${FACTORY_HOME:-$HOME/.factory}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+AGY_DIR="${ANTIGRAVITY_CONFIG_DIR:-$HOME/.gemini/config}"
 HOOK="$PREFIX/bin/memory-hook"
 MARKER="claude-memory-hooks"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -63,6 +65,7 @@ detect() {
   { [ -d "$OPENCODE_DIR" ] || command -v opencode >/dev/null 2>&1 || command -v opencode2 >/dev/null 2>&1 \
     || command -v opencode-next >/dev/null 2>&1; } && found+=(opencode)
   { [ -d "$PI_DIR" ] || command -v pi >/dev/null 2>&1; } && found+=(pi)
+  { [ -d "$AGY_DIR" ] || command -v agy >/dev/null 2>&1; } && found+=(agy)
   printf '%s\n' "${found[@]:-}"
 }
 
@@ -70,7 +73,7 @@ if [ ${#targets[@]} -eq 0 ]; then
   while IFS= read -r t; do [ -n "$t" ] && targets+=("$t"); done < <(detect)
 fi
 if [ ${#targets[@]} -eq 0 ]; then
-  say "No supported harness found (droid, codex, opencode, pi). Name one to install anyway."
+  say "No supported harness found (droid, codex, opencode, pi, agy). Name one to install anyway."
   exit 1
 fi
 
@@ -95,6 +98,30 @@ edit_hooks() {
     (getpath($p) // {}) as $events
     | ((($events.SessionStart // []) | strip) + $add) as $list
     | setpath($p; if ($list | length) > 0 then $events + {SessionStart: $list} else $events | del(.SessionStart) end)')"
+  write_json "$file" "$before" "$after"
+}
+
+# Antigravity has no SessionStart event. Its hooks.json maps hook names to events,
+# so own the "$MARKER" entry: a PreInvocation hook that memory-hook runs only once
+# per conversation. Set it to command $2, or remove it when $2 is empty.
+edit_agy_hooks() {
+  local file="$1" command="${2:-}" original before after
+  if [ -f "$file" ]; then
+    original="$(jq . "$file")" || { say "  cannot parse $file as JSON; skipped"; return 1; }
+  else
+    [ -n "$command" ] || return 0
+    original='{}'
+  fi
+  before="$(printf '%s' "$original" | jq -S .)"
+  after="$(printf '%s' "$original" | jq --arg k "$MARKER" --arg c "$command" '
+    if $c == "" then del(.[$k])
+    else .[$k] = {PreInvocation: [{type: "command", command: $c, timeout: 10}]} end')"
+  write_json "$file" "$before" "$after"
+}
+
+# Write JSON $3 to file $1 unless it matches the key-sorted original $2.
+write_json() {
+  local file="$1" before="$2" after="$3"
   if [ "$(printf '%s' "$after" | jq -S .)" = "$before" ]; then
     say "  $file already up to date"
     return 0
@@ -177,6 +204,11 @@ setup_opencode() {
 setup_pi() {
   say "pi"
   place_adapter "$SRC/adapters/pi/project-memory.ts" "$PI_DIR/extensions/project-memory.ts"
+}
+
+setup_agy() {
+  say "agy"
+  edit_agy_hooks "$AGY_DIR/hooks.json" "$(hook_command agy)"
 }
 
 [ "$dry" = 1 ] && say "(dry run: nothing will be written)"

@@ -4,7 +4,8 @@ Claude Code keeps per-project memory under `~/.claude/projects/<slug>/memory/`:
 a `MEMORY.md` index plus one markdown file per fact. Claude Code loads it every
 session. Other coding agents do not.
 
-This repo makes Factory Droid, OpenAI Codex, OpenCode (1 and 2), and Pi load
+This repo makes Factory Droid, OpenAI Codex, OpenCode (1 and 2), Pi, and
+Antigravity (`agy`) load
 the same memory when a session starts. Each agent also gets instructions to keep that
 memory current, so every agent reads and writes one shared store.
 
@@ -32,6 +33,7 @@ registers the hook with each harness:
 | OpenCode 1 | A plugin at `~/.config/opencode/plugins/project-memory.js` | First message of each top-level session, and after compaction |
 | OpenCode 2 | The same plugin file | System prompt of every model request in a top-level session |
 | Pi | An extension at `~/.pi/agent/extensions/project-memory.ts` | First turn of each session, and after compaction |
+| Antigravity | A `PreInvocation` hook under the `claude-memory-hooks` key in `~/.gemini/config/hooks.json` | First model call of each conversation |
 | Claude Code | Nothing | Claude Code loads its own memory |
 
 ### OpenCode 1 and 2
@@ -50,6 +52,14 @@ without a reload. Subagent sessions (those with a parent) get nothing. The
 service watches the plugin file and reloads it after an install, so you do not
 need to restart it. Verified against OpenCode 1.18.34 and OpenCode 2.0.22.
 
+### Antigravity
+
+Antigravity has no session-start event. Its `PreInvocation` hook runs before
+every model call, so the hook checks the conversation transcript and injects
+the memory as a user message only when no earlier message carries the
+`<project-memory>` block. Later calls in the same conversation get `{}`. The
+project comes from the first entry in `workspacePaths`.
+
 Running the installer again is safe. It replaces its own hook entry and keeps
 every other hook. Before it edits a JSON config, it writes a backup next to it
 named `*.bak-claude-memory-hooks-<timestamp>`.
@@ -62,7 +72,7 @@ needs `hooks = true` under `[features]` in `~/.codex/config.toml`; the
 installer reminds you when that line is missing.
 
 Overrides: `FACTORY_HOME`, `CODEX_HOME`, `XDG_CONFIG_HOME`,
-`PI_CODING_AGENT_DIR`, `XDG_DATA_HOME`, and `CLAUDE_CONFIG_DIR` (when the
+`PI_CODING_AGENT_DIR`, `ANTIGRAVITY_CONFIG_DIR`, `XDG_DATA_HOME`, and `CLAUDE_CONFIG_DIR` (when the
 Claude home is not `~/.claude`).
 
 ## What the agent sees
@@ -90,7 +100,7 @@ echo '{"cwd":"'"$PWD"'"}' | ~/.local/share/claude-memory-hooks/bin/memory-hook t
 ```
 
 The first argument picks the output format: `droid` and `codex` print
-`SessionStart` hook JSON; `text` prints plain text for the OpenCode and Pi
+`SessionStart` hook JSON; `agy` prints `PreInvocation` JSON; `text` prints plain text for the OpenCode and Pi
 adapters.
 
 ## Layout
