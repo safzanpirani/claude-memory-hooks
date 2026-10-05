@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# memory-hook: print a project's Claude Code auto-memory plus upkeep instructions
+# for agents that do not load it natively (Droid, Codex, OpenCode, Pi).
+# Reads memory through ../lib/read-memory.sh, relative to this script.
+#
+# Usage: memory-hook droid|codex|text < hook-input.json
+#   droid, codex  emit SessionStart JSON (hookSpecificOutput.additionalContext)
+#   text          emit plain text (OpenCode plugin, Pi extension)
+# The working directory comes from the input's "cwd" field, else $PWD.
+# Prints nothing and exits 0 on any failure, so a broken hook never blocks a session.
+
+set -uo pipefail
+
+self="$0"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+READER="$(cd "$(dirname "$self")/.." && pwd -P)/lib/read-memory.sh"
+fmt="${1:-text}"
+
+input="$(cat 2>/dev/null || true)"
+cwd=""
+if [ -n "$input" ] && command -v jq >/dev/null 2>&1; then
+  cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+fi
+[ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
+[ -x "$READER" ] || exit 0
+
+own="$("$READER" --dir "$cwd" 2>/dev/null)" || exit 0
+memory="$("$READER" "$cwd" 2>/dev/null)" || memory=""
+
+if [ -n "$memory" ]; then
+  body="<project-memory>
+$memory
+</project-memory>
+
+Memories were true when written. Before acting on a file, flag, command, host, or branch a memory names, verify it still exists. Read the fact files relevant to the task."
+else
+  body="<project-memory>
+No project memory exists yet for this project.
+</project-memory>"
+fi
+
+body="$body
+
+Keep this project's memory current without being asked. It lives in:
+  $own
+- Fix or delete a memory you find wrong or stale, and update a memory in the same turn as work that changes the fact it records.
+- Save durable facts a future session needs and cannot derive from the repo, AGENTS.md, or git history: decisions and their reasons, constraints, external pointers, user preferences or corrections. Skip anything that only matters to this conversation.
+- One fact per file with a stable descriptive name (e.g. project_topic.md). Update an existing file that covers the subject instead of adding a duplicate. Format:
+  ---
+  name: short-kebab-case-slug
+  description: one-line summary used to decide relevance
+  metadata:
+    type: user | feedback | project | reference
+  ---
+  The fact. For feedback/project, add **Why:** and **How to apply:** lines.
+- Add or edit one index line per file in MEMORY.md: \`- [Title](file.md) — hook\`. Delete the line when you delete the file. Repair any index drift reported above.
+- Use absolute dates (date +%F). Never store secrets, credentials, tokens, or private data. Keep local changes, tests, commits, pushes, and deploys distinct.
+- In your final reply, say which memory files you created, changed, or deleted."
+
+case "$fmt" in
+  droid)
+    jq -n --arg ctx "$body" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}, suppressOutput: true}'
+    ;;
+  codex)
+    jq -n --arg ctx "$body" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
+    ;;
+  *)
+    printf '%s\n' "$body"
+    ;;
+esac
