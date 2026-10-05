@@ -11,7 +11,7 @@ memory current, so every agent reads and writes one shared store.
 ## Install
 
 ```sh
-git clone <this repo> && cd claude-memory-hooks
+git clone https://github.com/safzanpirani/claude-memory-hooks && cd claude-memory-hooks
 ./install.sh              # every harness found on this machine
 ./install.sh droid pi     # only the named harnesses
 ./install.sh --dry-run    # show what would change
