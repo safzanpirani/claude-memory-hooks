@@ -149,12 +149,13 @@ install_scripts() {
   run mkdir -p "$PREFIX/bin" "$PREFIX/lib"
   run install -m 755 "$SRC/bin/memory-hook" "$PREFIX/bin/memory-hook"
   run install -m 755 "$SRC/lib/read-memory.sh" "$PREFIX/lib/read-memory.sh"
+  run install -m 644 "$SRC/lib/memory-prompt.md" "$PREFIX/lib/memory-prompt.md"
 }
 
 uninstall_scripts() {
   say "scripts in $PREFIX"
   [ -d "$PREFIX" ] || { say "  not installed"; return 0; }
-  run rm -f "$PREFIX/bin/memory-hook" "$PREFIX/lib/read-memory.sh"
+  run rm -f "$PREFIX/bin/memory-hook" "$PREFIX/lib/read-memory.sh" "$PREFIX/lib/memory-prompt.md"
   run rmdir "$PREFIX/bin" "$PREFIX/lib" "$PREFIX" 2>/dev/null || true
 }
 

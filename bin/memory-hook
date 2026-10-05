@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# memory-hook: print a project's Claude Code auto-memory plus upkeep instructions
-# for agents that do not load it natively (Droid, Codex, OpenCode, Pi, Antigravity).
-# Reads memory through ../lib/read-memory.sh, relative to this script.
+# memory-hook: print a project's Claude Code auto-memory plus Claude Code's own
+# memory instructions, for agents that do not load it natively (Droid, Codex,
+# OpenCode, Pi, Antigravity). Reads memory through ../lib/read-memory.sh and
+# the instructions from ../lib/memory-prompt.md, relative to this script.
 #
 # Usage: memory-hook droid|codex|agy|text < hook-input.json
 #   droid, codex  emit SessionStart JSON (hookSpecificOutput.additionalContext)
@@ -20,7 +21,9 @@ while [ -L "$self" ]; do
   link="$(readlink "$self")"
   case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
 done
-READER="$(cd "$(dirname "$self")/.." && pwd -P)/lib/read-memory.sh"
+ROOT="$(cd "$(dirname "$self")/.." && pwd -P)"
+READER="$ROOT/lib/read-memory.sh"
+PROMPT="$ROOT/lib/memory-prompt.md"
 fmt="${1:-text}"
 
 # Antigravity expects a JSON object on stdout even when there is nothing to add.
@@ -48,37 +51,66 @@ fi
 [ -x "$READER" ] || skip
 
 own="$("$READER" --dir "$cwd" 2>/dev/null)" || skip
-memory="$("$READER" "$cwd" 2>/dev/null)" || memory=""
+[ -f "$PROMPT" ] || skip
 
-if [ -n "$memory" ]; then
-  body="<project-memory>
-$memory
-</project-memory>
-
-Memories were true when written. Before acting on a file, flag, command, host, or branch a memory names, verify it still exists. Read the fact files relevant to the task."
+# The instructions are Claude Code's own "# Memory" system prompt section
+# (lib/memory-prompt.md), with the directory filled in.
+if [ -d "$own" ]; then
+  dir_note="This directory already exists — write to it directly with your file tools (do not run mkdir or check for its existence)."
 else
-  body="<project-memory>
-No project memory exists yet for this project.
-</project-memory>"
+  dir_note="This directory does not exist yet — create it with mkdir -p when you save the first memory."
+fi
+instructions="$(cat "$PROMPT")"
+instructions="${instructions//\{\{MEMORY_DIR\}\}/$own}"
+instructions="${instructions//\{\{DIR_NOTE\}\}/$dir_note}"
+
+# The index block mirrors how Claude Code loads MEMORY.md: a "Contents of ..."
+# header, then the index cut at 200 lines or 25,000 bytes with its warning.
+list="$("$READER" --list "$cwd" 2>/dev/null)" || list=""
+memdir="$(dirname "$(printf '%s\n' "$list" | head -1)")"
+index="$memdir/MEMORY.md"
+if [ -n "$list" ] && [ -f "$index" ]; then
+  contents="$(jq -rn --rawfile c "$index" '
+    def kb: (. / 1000 * 10 | round / 10 | tostring) + "KB";
+    ($c | sub("^\\s+"; "") | sub("\\s+$"; "")) as $t
+    | ($t | split("\n")) as $lines | ($lines | length) as $r | ($t | utf8bytelength) as $s
+    | if $r <= 200 and $s <= 25000 then $t else
+        (if $r > 200 then $lines[:200] | join("\n") else $t end) as $w0
+        | (if ($w0 | length) > 25000 then ($w0[:25000] | rindex("\n")) as $j
+             | (if $j != null and $j > 0 then $w0[:$j] else $w0[:25000] end)
+           else $w0 end) as $w
+        | (if $t[($w | length):($w | length) + 1] == "\n" then ($w | split("\n") | length) else 0 end) as $b
+        | ($t[($w | length) + 1:] | split("\n")[0] | ltrimstr(" ") | .[:80]) as $next
+        | (if $b == 0 then "everything after the first \($w | length) characters of line 1 was cut off"
+           else "\($r - $b) of \($r) lines were cut off, starting at line \($b + 1)" + (if $next != "" then " (\"\($next)\")" else "" end) end) as $i
+        | (if $s > 25000 and $r <= 200 then "\($s | kb) (limit: \(25000 | kb)) — index entries are too long"
+           elif $r > 200 and $s <= 25000 then "\($r) lines (limit: 200)"
+           else "\($r) lines and \($s | kb)" end) as $a
+        | "\($w)\n\n> WARNING: MEMORY.md is \($a). Only part of it was loaded: \($i). Keep index entries to one line under ~200 chars; move detail into topic files."
+      end' 2>/dev/null)" || contents="$(cat "$index")"
+  [ -n "$contents" ] || contents="Your MEMORY.md is currently empty. When you save new memories, they will appear here."
+  memory="Contents of $index (user's auto-memory, persists across conversations):
+
+$contents"
+  if [ "$memdir" != "$own" ]; then
+    memory="$memory
+
+NOTE: this project has no memory of its own. The index above belongs to the nearest ancestor project. Treat it as background, and save new memories for this project to $own."
+  fi
+  drift="$("$READER" "$cwd" 2>/dev/null | sed -n '/^===== index drift/,$p' | sed 1d)"
+  [ -z "$drift" ] || memory="$memory
+
+MEMORY.md and the memory files have drifted apart. Fix this while you are here:
+$drift"
+else
+  memory="Your MEMORY.md is currently empty. When you save new memories, they will appear here."
 fi
 
-body="$body
+body="$instructions
 
-Keep this project's memory current without being asked. It lives in:
-  $own
-- Fix or delete a memory you find wrong or stale, and update a memory in the same turn as work that changes the fact it records.
-- Save durable facts a future session needs and cannot derive from the repo, AGENTS.md, or git history: decisions and their reasons, constraints, external pointers, user preferences or corrections. Skip anything that only matters to this conversation.
-- One fact per file with a stable descriptive name (e.g. project_topic.md). Update an existing file that covers the subject instead of adding a duplicate. Format:
-  ---
-  name: short-kebab-case-slug
-  description: one-line summary used to decide relevance
-  metadata:
-    type: user | feedback | project | reference
-  ---
-  The fact. For feedback/project, add **Why:** and **How to apply:** lines.
-- Add or edit one index line per file in MEMORY.md: \`- [Title](file.md) — hook\`. Delete the line when you delete the file. Repair any index drift reported above.
-- Use absolute dates (date +%F). Never store secrets, credentials, tokens, or private data. Keep local changes, tests, commits, pushes, and deploys distinct.
-- In your final reply, say which memory files you created, changed, or deleted."
+<project-memory>
+$memory
+</project-memory>"
 
 case "$fmt" in
   droid)

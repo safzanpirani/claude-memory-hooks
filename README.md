@@ -79,19 +79,35 @@ Claude home is not `~/.claude`).
 
 `memory-hook` resolves the project from the session's working directory. It
 uses the main checkout's git root, so subdirectories and worktrees share one
-memory. When the project has no memory of its own, it falls back to the
-nearest ancestor that has one and labels it as background. Then it prints:
+memory. Then it prints what Claude Code itself puts in context:
 
-- the `MEMORY.md` index and the paths of the fact files,
-- any drift between the index and the files,
-- a reminder to verify named files, hosts, and flags before acting on them,
-- the directory where new memory for this project belongs, and the rules for
-  writing it: one fact per file, the frontmatter format, the index line, no
-  secrets, and absolute dates.
+- Claude Code's `# Memory` system prompt section, from
+  `lib/memory-prompt.md`, with the project's memory directory filled in. It
+  tells the agent where memory lives, the frontmatter format, the four memory
+  types, the `MEMORY.md` index line, what not to save, and to verify a
+  remembered file or flag before relying on it.
+- The `MEMORY.md` index inside a `<project-memory>` block, under the same
+  `Contents of …/MEMORY.md (user's auto-memory, persists across
+  conversations):` header Claude Code uses. Like Claude Code, it cuts the
+  index at 200 lines or 25,000 bytes and appends Claude Code's warning.
 
-A project without memory still gets the directory and the rules, so the first
-agent to learn something durable can start the memory. When anything fails,
-the hook prints nothing and exits 0, so it never blocks a session.
+`lib/memory-prompt.md` is copied from Claude Code 2.1.287, rendered for a
+single private memory directory. Three phrases differ so they apply outside
+Claude Code: "the Write tool" becomes "your file tools", the list of what the
+repo already records names `AGENTS.md` beside `CLAUDE.md`, and recalled
+memories are said to arrive in the `<project-memory>` block instead of
+`<system-reminder>` blocks. To resync after a Claude Code update, compare the
+file with the `# Memory` section of a Claude Code session's system prompt.
+
+The hook adds two things Claude Code does not do. When the project has no
+memory of its own, it shows the nearest ancestor project's index and labels it
+as background. When the index and the memory files disagree, it lists the
+drift and asks the agent to fix it.
+
+A project without memory still gets the instructions and its memory directory,
+so the first agent to learn something durable can start the memory. When
+anything fails, the hook prints nothing and exits 0, so it never blocks a
+session.
 
 Try it by hand:
 
@@ -106,7 +122,8 @@ adapters.
 ## Layout
 
 ```
-bin/memory-hook                    prints memory + upkeep rules
+bin/memory-hook                    prints the memory instructions and index
+lib/memory-prompt.md               Claude Code's memory instructions
 lib/read-memory.sh                 finds and reads a project's memory directory
 adapters/opencode/project-memory.js
 adapters/pi/project-memory.ts
