@@ -65,11 +65,27 @@ every other hook. Before it edits a JSON config, it writes a backup next to it
 named `*.bak-claude-memory-hooks-<timestamp>`.
 
 Hooks load when an agent starts, so already running sessions do not pick them
-up. Codex asks you to trust a new hook the first time an interactive session
-sees it. Until you trust it, `codex exec` skips the hook without a warning.
-Codex also
-needs `hooks = true` under `[features]` in `~/.codex/config.toml`; the
-installer reminds you when that line is missing.
+up.
+
+### Codex
+
+Codex needs `hooks = true` under `[features]` in `~/.codex/config.toml`; the
+installer reminds you when that line is missing. Codex asks you to trust a new
+hook the first time an interactive session sees it. Until you trust it, Codex
+skips the hook without a warning.
+
+`codex exec` (tested with Codex 0.160.0) skipped the hook even after the hook
+showed as trusted and enabled under `[hooks.state]`. With
+`--dangerously-bypass-hook-trust`, the hook ran, and the model saved a new
+memory in the Claude memory directory in the right format. When a run
+answers without project memory, check for a `hook: SessionStart` line in its
+output.
+
+Codex also has its own memory feature (`[memories] use_memories = true`),
+which tells the model to save notes under `~/.codex/memories`. When the hook
+does not run, the model follows those instructions instead. Set
+`use_memories = false` and `generate_memories = false` to keep one memory
+store.
 
 Overrides: `FACTORY_HOME`, `CODEX_HOME`, `XDG_CONFIG_HOME`,
 `PI_CODING_AGENT_DIR`, `ANTIGRAVITY_CONFIG_DIR`, `XDG_DATA_HOME`, and `CLAUDE_CONFIG_DIR` (when the
