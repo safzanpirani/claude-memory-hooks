@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh: load Claude Code's per-project memory into Droid, Codex,
-# OpenCode, Pi, and Antigravity (agy) sessions. Run ./install.sh --help for usage.
+# OpenCode, Pi, oh-my-pi (omp), and Antigravity (agy) sessions. Run ./install.sh --help for usage.
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options] [harness...]
 
-Harnesses: droid, codex, opencode (1 and 2), pi, agy, all.
+Harnesses: droid, codex, opencode (1 and 2), pi, omp, agy, all.
 With no harness named, installs for every harness found on this machine.
 
 Options:
@@ -19,7 +19,7 @@ Options:
   -h, --help      show this help
 
 Environment overrides: FACTORY_HOME, CODEX_HOME, XDG_CONFIG_HOME, PI_CODING_AGENT_DIR,
-ANTIGRAVITY_CONFIG_DIR.
+OMP_AGENT_DIR, ANTIGRAVITY_CONFIG_DIR.
 EOF
 }
 
@@ -36,8 +36,8 @@ while [ $# -gt 0 ]; do
     --prefix) [ $# -ge 2 ] || { echo "--prefix needs a directory" >&2; exit 2; }; PREFIX="$2"; shift ;;
     --prefix=*) PREFIX="${1#--prefix=}" ;;
     -h|--help) usage; exit 0 ;;
-    all) targets=(droid codex opencode pi agy) ;;
-    droid|codex|opencode|pi|agy) targets+=("$1") ;;
+    all) targets=(droid codex opencode pi omp agy) ;;
+    droid|codex|opencode|pi|omp|agy) targets+=("$1") ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
@@ -50,6 +50,7 @@ FACTORY_DIR="${FACTORY_HOME:-$HOME/.factory}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 PI_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+OMP_DIR="${OMP_AGENT_DIR:-$HOME/.omp/agent}"
 AGY_DIR="${ANTIGRAVITY_CONFIG_DIR:-$HOME/.gemini/config}"
 HOOK="$PREFIX/bin/memory-hook"
 MARKER="claude-memory-hooks"
@@ -65,6 +66,7 @@ detect() {
   { [ -d "$OPENCODE_DIR" ] || command -v opencode >/dev/null 2>&1 || command -v opencode2 >/dev/null 2>&1 \
     || command -v opencode-next >/dev/null 2>&1; } && found+=(opencode)
   { [ -d "$PI_DIR" ] || command -v pi >/dev/null 2>&1; } && found+=(pi)
+  { [ -d "$OMP_DIR" ] || command -v omp >/dev/null 2>&1; } && found+=(omp)
   { [ -d "$AGY_DIR" ] || command -v agy >/dev/null 2>&1; } && found+=(agy)
   printf '%s\n' "${found[@]:-}"
 }
@@ -73,7 +75,7 @@ if [ ${#targets[@]} -eq 0 ]; then
   while IFS= read -r t; do [ -n "$t" ] && targets+=("$t"); done < <(detect)
 fi
 if [ ${#targets[@]} -eq 0 ]; then
-  say "No supported harness found (droid, codex, opencode, pi, agy). Name one to install anyway."
+  say "No supported harness found (droid, codex, opencode, pi, omp, agy). Name one to install anyway."
   exit 1
 fi
 
@@ -205,6 +207,11 @@ setup_opencode() {
 setup_pi() {
   say "pi"
   place_adapter "$SRC/adapters/pi/project-memory.ts" "$PI_DIR/extensions/project-memory.ts"
+}
+
+setup_omp() {
+  say "omp"
+  place_adapter "$SRC/adapters/omp/project-memory.ts" "$OMP_DIR/extensions/project-memory.ts"
 }
 
 setup_agy() {

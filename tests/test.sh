@@ -8,8 +8,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
-unset ANTIGRAVITY_CONFIG_DIR FACTORY_HOME CODEX_HOME XDG_CONFIG_HOME XDG_DATA_HOME PI_CODING_AGENT_DIR CLAUDE_CONFIG_DIR
-mkdir -p "$HOME/.factory" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.pi/agent" "$HOME/.gemini/config"
+unset ANTIGRAVITY_CONFIG_DIR FACTORY_HOME CODEX_HOME XDG_CONFIG_HOME XDG_DATA_HOME PI_CODING_AGENT_DIR OMP_AGENT_DIR CLAUDE_CONFIG_DIR
+mkdir -p "$HOME/.factory" "$HOME/.codex" "$HOME/.config/opencode" "$HOME/.pi/agent" "$HOME/.omp/agent" "$HOME/.gemini/config"
 printf '{"other": {"Stop": [{"type": "command", "command": "other-tool stop"}]}}\n' > "$HOME/.gemini/config/hooks.json"
 
 pass=0
@@ -54,6 +54,7 @@ check "codex hooks.json created" test "$(count_hooks "$HOME/.codex/hooks.json" .
 check "opencode plugin path filled" grep -qF "\"$HOOK\"" "$HOME/.config/opencode/plugins/project-memory.js"
 check "agy hook added" jq -e --arg h "$HOOK" '.["claude-memory-hooks"].PreInvocation[0].command == "\u0027\($h)\u0027 agy" and .other.Stop[0].command == "other-tool stop"' "$HOME/.gemini/config/hooks.json"
 check "pi extension path filled" grep -qF "\"$HOOK\"" "$HOME/.pi/agent/extensions/project-memory.ts"
+check "omp extension path filled" grep -qF "\"$HOOK\"" "$HOME/.omp/agent/extensions/project-memory.ts"
 
 "$ROOT/install.sh" all > /dev/null
 check "reinstall keeps one droid hook" test "$(count_hooks "$HOME/.factory/settings.json" .hooks.SessionStart)" = 1
@@ -128,6 +129,24 @@ await h.session_start({ reason: "reload" }); r.push(await turn());
 console.log(JSON.stringify(r));
 EOF
   check "pi: startup, not repeat, after compact, not reload" test "$(bun "$TMP/pi.ts" 2>/dev/null)" = '[true,false,true,false]'
+  cat > "$TMP/omp.ts" <<EOF
+import ext from "$HOME/.omp/agent/extensions/project-memory.ts";
+let h: Function = () => {};
+ext({ on: (e: string, f: Function) => { if (e === "before_agent_start") h = f; } } as any);
+const branch: any[] = [];
+const turn = async (kind = "main") => {
+  const m = (await h({}, { cwd: "$PROJ", agent: { kind }, sessionManager: { getBranch: () => branch } }))?.message;
+  if (m) branch.push({ id: "e" + branch.length, type: "custom_message", customType: m.customType });
+  branch.push({ id: "e" + branch.length, type: "message" });
+  return Boolean(m?.content?.includes("box-7"));
+};
+const r: boolean[] = [await turn(), await turn(), await turn("sub")];
+branch.push({ id: "c1", type: "compaction", firstKeptEntryId: "e0" }); r.push(await turn());
+branch.push({ id: "c2", type: "compaction", firstKeptEntryId: "e" + (branch.length - 1) }); r.push(await turn());
+branch.length = 0; r.push(await turn());
+console.log(JSON.stringify(r));
+EOF
+  check "omp: first, not repeat, not sub, kept by compact, after compact, new session" test "$(bun "$TMP/omp.ts" 2>/dev/null)" = '[true,false,false,false,true,true]'
 fi
 
 "$ROOT/install.sh" --uninstall all > /dev/null
@@ -135,7 +154,7 @@ check "uninstall removes droid hook" test "$(count_hooks "$HOME/.factory/setting
 check "uninstall keeps other droid hooks" jq -e '.hooks.SessionStart[0].hooks[0].command == "other-tool start" and (.hooks.Stop | length) == 1' "$HOME/.factory/settings.json"
 check "uninstall drops empty codex SessionStart" jq -e '.hooks | has("SessionStart") | not' "$HOME/.codex/hooks.json"
 check "uninstall removes only the agy hook" jq -e '(has("claude-memory-hooks") | not) and has("other")' "$HOME/.gemini/config/hooks.json"
-check "uninstall removes adapters" test ! -e "$HOME/.config/opencode/plugins/project-memory.js" -a ! -e "$HOME/.pi/agent/extensions/project-memory.ts"
+check "uninstall removes adapters" test ! -e "$HOME/.config/opencode/plugins/project-memory.js" -a ! -e "$HOME/.pi/agent/extensions/project-memory.ts" -a ! -e "$HOME/.omp/agent/extensions/project-memory.ts"
 check "uninstall removes scripts" test ! -e "$HOME/.local/share/claude-memory-hooks"
 
 echo "$pass passed, $fail failed"

@@ -4,8 +4,8 @@ Claude Code keeps per-project memory under `~/.claude/projects/<slug>/memory/`:
 a `MEMORY.md` index plus one markdown file per fact. Claude Code loads it every
 session. Other coding agents do not.
 
-This repo makes Factory Droid, OpenAI Codex, OpenCode (1 and 2), Pi, and
-Antigravity (`agy`) load
+This repo makes Factory Droid, OpenAI Codex, OpenCode (1 and 2), Pi, oh-my-pi
+(`omp`), and Antigravity (`agy`) load
 the same memory when a session starts. Each agent also gets instructions to keep that
 memory current, so every agent reads and writes one shared store.
 
@@ -33,6 +33,7 @@ registers the hook with each harness:
 | OpenCode 1 | A plugin at `~/.config/opencode/plugins/project-memory.js` | First message of each top-level session, and after compaction |
 | OpenCode 2 | The same plugin file | System prompt of every model request in a top-level session |
 | Pi | An extension at `~/.pi/agent/extensions/project-memory.ts` | First turn of each session, and after compaction |
+| oh-my-pi | An extension at `~/.omp/agent/extensions/project-memory.ts` | First turn of each top-level session, and after compaction |
 | Antigravity | A `PreInvocation` hook under the `claude-memory-hooks` key in `~/.gemini/config/hooks.json` | First model call of each conversation |
 | Claude Code | Nothing | Claude Code loads its own memory |
 
@@ -51,6 +52,17 @@ the system prompt is rebuilt for every request, the memory survives compaction
 without a reload. Subagent sessions (those with a parent) get nothing. The
 service watches the plugin file and reloads it after an install, so you do not
 need to restart it. Verified against OpenCode 1.18.34 and OpenCode 2.0.22.
+
+### oh-my-pi
+
+omp loads extensions from `~/.omp/agent/extensions`, not from Pi's directory,
+so it gets its own copy of the adapter. Before each turn the adapter walks the
+current session branch back from the leaf. It injects the memory when that
+walk finds no earlier `project-memory` message, and it stops at the latest
+compaction's first kept entry. One check covers startup, `/new`, resume, fork,
+and compaction. Subagents (`ctx.agent.kind === "sub"`) get nothing. omp's own
+memory backend (`memory.backend`) defaults to `off`; leave it off to keep one
+memory store. Verified against omp 18.6.1.
 
 ### Antigravity
 
@@ -88,7 +100,7 @@ does not run, the model follows those instructions instead. Set
 store.
 
 Overrides: `FACTORY_HOME`, `CODEX_HOME`, `XDG_CONFIG_HOME`,
-`PI_CODING_AGENT_DIR`, `ANTIGRAVITY_CONFIG_DIR`, `XDG_DATA_HOME`, and `CLAUDE_CONFIG_DIR` (when the
+`PI_CODING_AGENT_DIR`, `OMP_AGENT_DIR`, `ANTIGRAVITY_CONFIG_DIR`, `XDG_DATA_HOME`, and `CLAUDE_CONFIG_DIR` (when the
 Claude home is not `~/.claude`).
 
 ## What the agent sees
@@ -132,7 +144,7 @@ echo '{"cwd":"'"$PWD"'"}' | ~/.local/share/claude-memory-hooks/bin/memory-hook t
 ```
 
 The first argument picks the output format: `droid` and `codex` print
-`SessionStart` hook JSON; `agy` prints `PreInvocation` JSON; `text` prints plain text for the OpenCode and Pi
+`SessionStart` hook JSON; `agy` prints `PreInvocation` JSON; `text` prints plain text for the OpenCode, Pi, and omp
 adapters.
 
 ## Layout
@@ -143,6 +155,7 @@ lib/memory-prompt.md               Claude Code's memory instructions
 lib/read-memory.sh                 finds and reads a project's memory directory
 adapters/opencode/project-memory.js
 adapters/pi/project-memory.ts
+adapters/omp/project-memory.ts
 install.sh
 tests/test.sh                      offline tests in a throwaway HOME
 ```
@@ -154,5 +167,5 @@ tests/test.sh
 ```
 
 The tests install into a temporary `HOME`. They check each config edit,
-reinstall, the hook output, the OpenCode 1, OpenCode 2, and Pi adapters (when
+reinstall, the hook output, the OpenCode 1, OpenCode 2, Pi, and omp adapters (when
 `node` and `bun` exist), and uninstall. They make no network calls.
